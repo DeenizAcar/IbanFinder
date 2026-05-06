@@ -6,6 +6,7 @@ class IbanEntry {
   final String iban;
   final String? bank;
   final String? note;
+  final String? category;
 
   const IbanEntry({
     required this.id,
@@ -13,6 +14,7 @@ class IbanEntry {
     required this.iban,
     this.bank,
     this.note,
+    this.category,
   });
 
   IbanEntry copyWith({
@@ -20,6 +22,7 @@ class IbanEntry {
     String? iban,
     String? bank,
     String? note,
+    String? category,
   }) {
     return IbanEntry(
       id: id,
@@ -27,6 +30,7 @@ class IbanEntry {
       iban: iban ?? this.iban,
       bank: bank ?? this.bank,
       note: note ?? this.note,
+      category: category ?? this.category,
     );
   }
 
@@ -36,6 +40,7 @@ class IbanEntry {
         'iban': iban,
         if (bank != null && bank!.isNotEmpty) 'bank': bank,
         if (note != null && note!.isNotEmpty) 'note': note,
+        if (category != null && category!.isNotEmpty) 'category': category,
       };
 
   factory IbanEntry.fromJson(Map<String, dynamic> json) {
@@ -45,6 +50,7 @@ class IbanEntry {
       iban: normalizeIban((json['iban'] ?? '').toString()),
       bank: (json['bank'] as String?)?.trim(),
       note: (json['note'] as String?)?.trim(),
+      category: (json['category'] as String?)?.trim(),
     );
   }
 

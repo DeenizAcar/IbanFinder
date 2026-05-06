@@ -4,7 +4,6 @@ import '../models/iban_entry.dart';
 
 class IbanTile extends StatelessWidget {
   final IbanEntry entry;
-  final VoidCallback onCopy;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onTap;
@@ -13,7 +12,6 @@ class IbanTile extends StatelessWidget {
   const IbanTile({
     super.key,
     required this.entry,
-    required this.onCopy,
     required this.onEdit,
     required this.onDelete,
     required this.onTap,
@@ -27,7 +25,7 @@ class IbanTile extends StatelessWidget {
         entry.name.isNotEmpty ? entry.name.characters.first.toUpperCase() : '?';
 
     final subtitleParts = <String>[
-      IbanEntry.formatIban(entry.iban),
+      entry.iban,
       if (entry.bank != null && entry.bank!.isNotEmpty) entry.bank!,
       if (entry.note != null && entry.note!.isNotEmpty) entry.note!,
     ];
@@ -75,11 +73,6 @@ class IbanTile extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                tooltip: 'Kopyala',
-                icon: const Icon(Icons.copy_rounded),
-                onPressed: onCopy,
               ),
               PopupMenuButton<String>(
                 tooltip: 'Daha fazla',

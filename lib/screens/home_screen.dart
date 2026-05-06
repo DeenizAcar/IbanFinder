@@ -20,7 +20,11 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+const String _tabAll = 'Tümü';
+const String _tabUncategorized = 'Diğer';
+
+class _HomeScreenState extends State<HomeScreen>
+    with TickerProviderStateMixin {
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
   final _speech = SpeechToText();
@@ -33,9 +37,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _listening = false;
   String? _highlightedId;
 
+  late TabController _tabController;
+  List<String> _tabs = const [_tabAll];
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 1, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _searchController.addListener(() {
       setState(() => _query = _searchController.text);
     });
@@ -44,10 +53,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
     _speech.cancel();
     super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tabController.indexIsChanging) return;
+    setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -55,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     setState(() {
       _entries = loaded;
+      _rebuildTabsIfNeeded();
       _loading = false;
     });
   }
@@ -63,16 +80,78 @@ class _HomeScreenState extends State<HomeScreen> {
     await StorageService.instance.save(_entries);
   }
 
+  List<String> get _categories {
+    final set = <String>{};
+    for (final e in _entries) {
+      final c = e.category?.trim() ?? '';
+      if (c.isNotEmpty) set.add(c);
+    }
+    final list = set.toList()..sort();
+    return list;
+  }
+
+  void _rebuildTabsIfNeeded() {
+    final cats = _categories;
+    final hasUncategorized = _entries.any(
+      (e) => e.category == null || e.category!.trim().isEmpty,
+    );
+    final newTabs = <String>[
+      _tabAll,
+      ...cats,
+      if (cats.isNotEmpty && hasUncategorized) _tabUncategorized,
+    ];
+    if (_tabs.length == newTabs.length) {
+      var same = true;
+      for (var i = 0; i < newTabs.length; i++) {
+        if (_tabs[i] != newTabs[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    final oldActive = _tabs.isEmpty || _tabController.index >= _tabs.length
+        ? _tabAll
+        : _tabs[_tabController.index];
+    final found = newTabs.indexOf(oldActive);
+    final newIndex = found == -1 ? 0 : found;
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    _tabController = TabController(
+      length: newTabs.length,
+      vsync: this,
+      initialIndex: newIndex,
+    );
+    _tabController.addListener(_onTabChanged);
+    _tabs = newTabs;
+  }
+
+  String get _activeTab =>
+      _tabs.isEmpty || _tabController.index >= _tabs.length
+          ? _tabAll
+          : _tabs[_tabController.index];
+
+  bool _matchesActiveTab(IbanEntry e) {
+    final tab = _activeTab;
+    if (tab == _tabAll) return true;
+    if (tab == _tabUncategorized) {
+      return e.category == null || e.category!.trim().isEmpty;
+    }
+    return e.category?.trim() == tab;
+  }
+
   List<IbanEntry> get _filtered {
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _entries;
+    final base = _entries.where(_matchesActiveTab);
+    if (q.isEmpty) return base.toList();
     final tokens = q.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
-    return _entries.where((e) {
+    return base.where((e) {
       final haystack = [
         e.name,
         e.iban,
         e.bank ?? '',
         e.note ?? '',
+        e.category ?? '',
       ].join(' ').toLowerCase();
       return tokens.every(haystack.contains);
     }).toList();
@@ -159,23 +238,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _addManual() async {
     final entry = await Navigator.of(context).push<IbanEntry>(
-      MaterialPageRoute(builder: (_) => const EditScreen()),
+      MaterialPageRoute(
+        builder: (_) => EditScreen(existingCategories: _categories),
+      ),
     );
     if (entry == null) return;
-    setState(() => _entries = [..._entries, entry]);
+    setState(() {
+      _entries = [..._entries, entry];
+      _rebuildTabsIfNeeded();
+    });
     await _persist();
     _toast('"${entry.name}" eklendi.');
   }
 
   Future<void> _edit(IbanEntry entry) async {
     final updated = await Navigator.of(context).push<IbanEntry>(
-      MaterialPageRoute(builder: (_) => EditScreen(existing: entry)),
+      MaterialPageRoute(
+        builder: (_) => EditScreen(
+          existing: entry,
+          existingCategories: _categories,
+        ),
+      ),
     );
     if (updated == null) return;
     setState(() {
       _entries = [
         for (final e in _entries) e.id == updated.id ? updated : e,
       ];
+      _rebuildTabsIfNeeded();
     });
     await _persist();
     _toast('"${updated.name}" güncellendi.');
@@ -202,7 +292,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (confirmed != true) return;
     final removed = entry;
     final index = _entries.indexWhere((e) => e.id == entry.id);
-    setState(() => _entries = _entries.where((e) => e.id != entry.id).toList());
+    setState(() {
+      _entries = _entries.where((e) => e.id != entry.id).toList();
+      _rebuildTabsIfNeeded();
+    });
     await _persist();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -213,7 +306,10 @@ class _HomeScreenState extends State<HomeScreen> {
           onPressed: () async {
             final list = [..._entries];
             list.insert(index.clamp(0, list.length), removed);
-            setState(() => _entries = list);
+            setState(() {
+              _entries = list;
+              _rebuildTabsIfNeeded();
+            });
             await _persist();
           },
         ),
@@ -251,7 +347,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final existingIbans = _entries.map((e) => e.iban).toSet();
       final fresh =
           imported.where((e) => !existingIbans.contains(e.iban)).toList();
-      setState(() => _entries = [..._entries, ...fresh]);
+      setState(() {
+        _entries = [..._entries, ...fresh];
+        _rebuildTabsIfNeeded();
+      });
       await _persist();
       _toast(
         '${fresh.length} yeni IBAN eklendi'
@@ -341,9 +440,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final filtered = _filtered;
     final theme = Theme.of(context);
 
+    final showTabs = _tabs.length > 1;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('IBAN Finder'),
+        bottom: showTabs
+            ? TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                tabs: [for (final t in _tabs) Tab(text: t)],
+              )
+            : null,
       ),
       body: Column(
         children: [
@@ -440,7 +549,6 @@ class _HomeScreenState extends State<HomeScreen> {
           entry: e,
           highlighted: e.id == _highlightedId,
           onTap: () => _copyIban(e),
-          onCopy: () => _copyIban(e),
           onEdit: () => _edit(e),
           onDelete: () => _delete(e),
         );

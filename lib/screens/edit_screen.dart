@@ -5,8 +5,13 @@ import '../models/iban_entry.dart';
 
 class EditScreen extends StatefulWidget {
   final IbanEntry? existing;
+  final List<String> existingCategories;
 
-  const EditScreen({super.key, this.existing});
+  const EditScreen({
+    super.key,
+    this.existing,
+    this.existingCategories = const [],
+  });
 
   @override
   State<EditScreen> createState() => _EditScreenState();
@@ -18,17 +23,26 @@ class _EditScreenState extends State<EditScreen> {
   late final TextEditingController _iban;
   late final TextEditingController _bank;
   late final TextEditingController _note;
+  late final TextEditingController _newCategory;
+
+  String? _category;
+  late List<String> _availableCategories;
+  bool _addingNewCategory = false;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
     _name = TextEditingController(text: e?.name ?? '');
-    _iban = TextEditingController(
-      text: e == null ? '' : IbanEntry.formatIban(e.iban),
-    );
+    _iban = TextEditingController(text: e?.iban ?? '');
     _bank = TextEditingController(text: e?.bank ?? '');
     _note = TextEditingController(text: e?.note ?? '');
+    _newCategory = TextEditingController();
+    _category = e?.category;
+    _availableCategories = [...widget.existingCategories];
+    if (_category != null && !_availableCategories.contains(_category)) {
+      _availableCategories = [..._availableCategories, _category!]..sort();
+    }
   }
 
   @override
@@ -37,10 +51,30 @@ class _EditScreenState extends State<EditScreen> {
     _iban.dispose();
     _bank.dispose();
     _note.dispose();
+    _newCategory.dispose();
     super.dispose();
   }
 
+  void _commitNewCategory() {
+    final v = _newCategory.text.trim();
+    if (v.isEmpty) {
+      setState(() => _addingNewCategory = false);
+      return;
+    }
+    setState(() {
+      if (!_availableCategories.contains(v)) {
+        _availableCategories = [..._availableCategories, v]..sort();
+      }
+      _category = v;
+      _addingNewCategory = false;
+      _newCategory.clear();
+    });
+  }
+
   void _save() {
+    if (_addingNewCategory && _newCategory.text.trim().isNotEmpty) {
+      _commitNewCategory();
+    }
     if (!_formKey.currentState!.validate()) return;
     final entry = IbanEntry(
       id: widget.existing?.id ?? IbanEntry.newId(),
@@ -48,6 +82,9 @@ class _EditScreenState extends State<EditScreen> {
       iban: IbanEntry.normalizeIban(_iban.text),
       bank: _bank.text.trim().isEmpty ? null : _bank.text.trim(),
       note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+      category: (_category == null || _category!.trim().isEmpty)
+          ? null
+          : _category!.trim(),
     );
     Navigator.of(context).pop(entry);
   }
@@ -89,20 +126,30 @@ class _EditScreenState extends State<EditScreen> {
               controller: _iban,
               textInputAction: TextInputAction.next,
               textCapitalization: TextCapitalization.characters,
+              maxLength: 26,
               inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 ]')),
-                _IbanFormatter(),
+                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                LengthLimitingTextInputFormatter(26),
+                TextInputFormatter.withFunction((oldValue, newValue) {
+                  return TextEditingValue(
+                    text: newValue.text.toUpperCase(),
+                    selection: newValue.selection,
+                  );
+                }),
               ],
               decoration: const InputDecoration(
                 labelText: 'IBAN',
-                hintText: 'TR00 0000 0000 0000 0000 0000 00',
+                hintText: 'TR000000000000000000000000',
+                helperText: 'TR + 24 rakam (toplam 26 karakter)',
                 prefixIcon: Icon(Icons.credit_card),
                 border: OutlineInputBorder(),
               ),
               validator: (v) {
-                final clean = IbanEntry.normalizeIban(v ?? '');
-                if (clean.isEmpty) return 'IBAN gerekli';
-                if (clean.length < 15) return 'IBAN çok kısa';
+                final value = (v ?? '').trim();
+                if (value.isEmpty) return 'IBAN gerekli';
+                if (value.length != 26) {
+                  return 'IBAN 26 karakter olmalı (girilen: ${value.length})';
+                }
                 return null;
               },
             ),
@@ -131,6 +178,8 @@ class _EditScreenState extends State<EditScreen> {
               minLines: 1,
               maxLines: 3,
             ),
+            const SizedBox(height: 20),
+            _buildCategorySection(),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _save,
@@ -142,19 +191,83 @@ class _EditScreenState extends State<EditScreen> {
       ),
     );
   }
-}
 
-class _IbanFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final clean = IbanEntry.normalizeIban(newValue.text);
-    final formatted = IbanEntry.formatIban(clean);
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
+  Widget _buildCategorySection() {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.label_outline, color: theme.colorScheme.outline),
+            const SizedBox(width: 8),
+            Text('Kategori', style: theme.textTheme.titleSmall),
+            const Spacer(),
+            if (_category != null)
+              TextButton.icon(
+                icon: const Icon(Icons.close, size: 16),
+                label: const Text('Kategorisiz'),
+                onPressed: () => setState(() => _category = null),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final c in _availableCategories)
+              ChoiceChip(
+                label: Text(c),
+                selected: _category == c,
+                onSelected: (selected) =>
+                    setState(() => _category = selected ? c : null),
+              ),
+            ActionChip(
+              avatar: const Icon(Icons.add, size: 18),
+              label: const Text('Yeni'),
+              onPressed: () => setState(() => _addingNewCategory = true),
+            ),
+          ],
+        ),
+        if (_addingNewCategory)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _newCategory,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _commitNewCategory(),
+                    decoration: const InputDecoration(
+                      labelText: 'Yeni kategori',
+                      hintText: 'Aile, İş, Borç…',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: _commitNewCategory,
+                  child: const Text('Ekle'),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Vazgeç',
+                  onPressed: () => setState(() {
+                    _addingNewCategory = false;
+                    _newCategory.clear();
+                  }),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
+
